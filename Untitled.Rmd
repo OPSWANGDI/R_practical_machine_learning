@@ -1,0 +1,141 @@
+Manner Prediction
+=====================================
+#### Sameul Wang
+
+2019-04-15
+
+### Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the [website](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+
+**Data**
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+### Assignment
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+### My_Solution
+```{r Setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE,error = FALSE,warning = FALSE)
+setwd("~/Documents/R-review/R-Practical_Machine_Learning")
+```
+
+From the website discription, we know this data set is structured as: 
+
+"Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)
+
+Read more: http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises#ixzz5kwIVninr"
+```{r Load}
+url1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url2<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(url1,"training.csv",method="curl")
+download.file(url2,"testing.csv",method="curl")
+
+training<-read.csv(file = "training.csv",sep = ",",header = TRUE)
+testing<-read.csv(file = "testing.csv",sep = ",",header = TRUE)
+
+dim(training)
+dim(testing)
+summary(training$classe)
+```
+
+By a glimps of the data, these are sevral column contains NA value, and some column containing useless information to our model. Thus we will delete those side-effect column. Also, those near zero columns should be dropped from model.
+```{r Clean}
+library(caret)
+training<- training[,-c(1,3:7)]
+training<-training[,!apply(is.na(training),2,sum)]
+training<-training[,-nearZeroVar(training)]
+names(training)
+```
+
+Seeing from the data, our goal is clear to build the fit model from and to validate in **training dataset**. Then use this model to predict 20 values in the **testing dataset**. 
+
+The error rate of our model will be a comparison between prediction value and real results in **training dataset**.  
+
+As training set is quite large with an observation of 19622, we will split it into 2 groups, 40% for testing, 60% for training.
+
+```{r Data Splicing}
+inTrain<-createDataPartition(y = training$classe,p = 0.6,list=FALSE )
+test<-training[-inTrain,]
+train<-training[inTrain,]
+```
+
+Then we look at the 'train' data to pickup some features for model. We know there are 6 participants, 4 sensors (with several measurements for each), and 5 activities. Let's generally look at 5 activities performancfe by 6 participants.
+
+```{r explore}
+library(ggplot2)
+train1<-train[,c("classe","user_name","roll_belt","pitch_belt","yaw_belt")]
+
+g1<-ggplot(data = train1, mapping = aes(x=1:nrow(train1),y = roll_belt,color=classe))+facet_grid(.~user_name)+geom_point()
+g1
+
+g2<-ggplot(data = train1, mapping = aes(x=1:nrow(train1),y = yaw_belt,color=classe))+facet_grid(.~user_name)+geom_point()
+g2
+
+g3<-ggplot(data = train1, mapping = aes(x=1:nrow(train1),y = pitch_belt,color=classe))+facet_grid(.~user_name)+geom_point()
+g3
+
+```
+The truth is we can not distingush some obvious features that can directly discriminate calsse, so that we can not fit a model with the physical and interpretable way. Therefore we will try the statistical way with the expense of lowering down interpret ability. 
+
+First, we will try relatively higher interpretability method, decision tree, to fit a model. The decison tree is a way to split data into 2 sub groups with the goal of best homogeneity on each leaves. To prevent overfit, we will prune to return best tree model.
+
+```{r Tree}
+library(rattle)
+library(rpart)
+mdl1<-train(classe~.,data=train, method= "rpart")
+mdl1
+pfit<- prune(mdl1$finalModel, cp=mdl1$finalModel$cptable[which.min(mdl1$finalModel$cptable[,3]),"CP"])
+fancyRpartPlot(pfit,main = "Decision Tree", sub="")
+
+
+
+```
+We can see, a simple decision tree model is failed to reduce internal variance, which returns with low accurary. 
+
+Then We will try the k-folds cross-validation plus random forest to help pick up the best predictors. The k-folds cross validation is a method to split data set into k random uniform groups. One by one, each group will be chosed as the testing while others as training. Finally choose the one with minimun out-of-model error rate to acheive maximun generalizaion. The random forest is this tech to bootstrap and average samples on each leaves of the desicion tree to achieve highly discrimination accuracy with the cost of interpret ability and precessing time.  
+
+```{r random forest and k-fold model}
+set.seed(123)
+mdl2<-train(classe~.,data=train, method= "rf",
+            trControl=trainControl(method="CV", number=10),verboseIter= TRUE)
+mdl2
+```
+Application of random forest is effective.  
+
+```{r Prediction }
+confusionMatrix(predict(mdl2, test),test$classe)
+```
+Generalize this model cunstrusted from 60% data to the remaining 40% test data. The out of sample error is acceptable with **accurary 0.9915 (that is a 0.0085 out of sample rate)** and Kappa 0.9892. 
+
+```{r Model Evaluation}
+library(pROC)
+roc<-roc(response = test$classe,predictor = factor(predict(mdl2, test),order=TRUE))
+roc
+
+y<-roc$sensitivities
+x<-1-roc$specificities
+
+par(new=TRUE)
+plot(y~x,type="l", col="red", xlab ="Specificity", ylab="1-Sensitivity",lwd=3)
+abline(a = 0,b=1, col="blue",lwd=3)
+title(main="ROC Curve")
+```
+The ROC curve proves good classification of this model with 0.9959 under curve area.
+
+```{r Model Application, include=FALSE}
+predict(object =mdl2, newdata =  testing)
+```
+
+
